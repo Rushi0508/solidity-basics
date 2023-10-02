@@ -1,28 +1,55 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "./PriceConverter.sol";
 
 contract FundMe{
+    using PriceConverter for uint256;
 
-    uint256 public minimumUsd = 50 * 1e18;
+    uint256 public constant MINIMUM_USD = 50 * 1e18;
+
+    address[] public funders;
+    mapping (address=>uint256) public addressToAmountFunded;
+
+    address public immutable i_owner;
+
+    constructor(){
+        i_owner = msg.sender;
+    }
 
     function fund() public payable { 
-        require(getConversionRate(msg.value) >= minimumUsd, "Didn't send enough");
+        require(msg.value.getConversionRate() >= MINIMUM_USD, "Didn't send enough");
+        funders.push(msg.sender);
+        addressToAmountFunded[msg.sender] = msg.value;
     }
 
-    function getPrice() public view returns (uint256){
-        // ABI
-        // Address 0x694AA1769357215DE4FAC081bf1f309aDC325306
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);
-        (,int256 price,,,) = priceFeed.latestRoundData();
+    function withdraw() public onlyOwner {
+        for(uint256 funderIndex=0; funderIndex<funders.length;funderIndex++){
+            address funder = funders[funderIndex];
+            addressToAmountFunded[funder] = 0;
+        }
+        funders = new address[](0);
 
-        return uint256(price * 1e10);
+        //  3 ways to withdraw: 
+        // transfer
+        // payable (msg.sender).transfer(address(this).balance);
+        // send
+        // bool sendSuccess = payable (msg.sender).send(address(this).balance);
+        // require(sendSuccess, "Send Failed");
+        //call
+        (bool callSuccess,) = payable (msg.sender).call{value: address(this).balance}("");
+        require(callSuccess, "Call Failed");
     }
 
-    function getConversionRate(uint256 ethAmount) public view returns(uint256){
-        uint256 ethPrice = getPrice();
-        uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1e18;
-        return ethAmountInUsd;
+    modifier onlyOwner{
+        require(msg.sender==i_owner, "Not Owner");
+        _;
+    }
+    receive() external payable { 
+        fund();
+    }
+
+    fallback() external payable { 
+        fund();
     }
 }
